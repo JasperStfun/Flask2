@@ -1,6 +1,7 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <link type="text/css" href="{{ url_for('static', filename='css/styles.css') }}" rel="stylesheet">
     <meta charset="UTF-8">
     <meta http-equiv="X-UA-Compatible" content="IE=edge">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -15,18 +16,21 @@
 <body>
     {% block content -%}
         {%- block mainmenu -%}
-            <ul>
+            <ul class="mainmenu">
                 {% for m in menu -%}
-                    <li>{{ m }}</li>
+                    <li><a href="{{ m.url }}">{{ m.name }}</a></li>
                 {% endfor -%}
             </ul>
         {% endblock mainmenu -%}
+        <div class="clear"></div>
+        <div class="content">
         {% if title -%}
             <h1>{{ title }}</h1>
         {% else -%}
             <h1>Pro Flask</h1>
         {% endif -%}
     {% endblock -%}
+    </div>
 </body>
 
 </html>

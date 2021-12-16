@@ -1,0 +1,6 @@
+{% extends 'base.html' %}
+
+{% block content %}
+{{ super() }}
+    <p>Ошибка 404, страница не найдена. Вернуться на <a href="{{ url_for ('index') }}">главную.</a></p>
+{% endblock %}
