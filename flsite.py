@@ -2,7 +2,11 @@ import sqlite3
 import os
 
 from flask import Flask, abort, g, flash, render_template, redirect, request, session, url_for
+from flask_login import LoginManager, login_user, login_required
+from werkzeug.security import generate_password_hash, check_password_hash
+
 from FDataBase import FDataBase
+from UserLogin import UserLogin
 
 
 DATABASE = '/tmp/flsite.db'
@@ -14,6 +18,14 @@ app = Flask(__name__)
 app.config.from_object(__name__)
 
 app.config.update(dict(DATABASE=os.path.join(app.root_path, 'flsite.db')))
+
+login_manager = LoginManager(app)
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    print('load_user')
+    return UserLogin().fromDB(user_id, dbase)
 
 
 def connect_db():
@@ -35,16 +47,13 @@ def get_db():
         g.link_db = connect_db()
     return g.link_db
 
-menu = [{"name": "Установка", "url":"install-flask"},
-        {"name": "Первое приложение", "url": "first-app"},
-        {"name": "Обратная связь", "url": "contact"},]
 
-
-@app.route('/')
-def index():
+dbase = None
+@app.before_request
+def before_request():
+    global dbase
     db = get_db()
     dbase = FDataBase(db)
-    return render_template('index.html', menu=dbase.getMenu(), posts=dbase.getPostsAnonce())
 
 
 @app.teardown_appcontext
@@ -53,10 +62,18 @@ def close_db(error):
         g.link_db.close()
 
 
+menu = [{"name": "Установка", "url":"install-flask"},
+        {"name": "Первое приложение", "url": "first-app"},
+        {"name": "Обратная связь", "url": "contact"},]
+
+
+@app.route('/')
+def index():
+    return render_template('index.html', menu=dbase.getMenu(), posts=dbase.getPostsAnonce())
+
+
 @app.route('/add_post', methods=['POST', 'GET'])
 def addPost():
-    db = get_db()
-    dbase = FDataBase(db)
 
     if request.method == 'POST':
         if len(request.form['name']) > 4 and len(request.form['post']) > 10:
@@ -72,24 +89,13 @@ def addPost():
 
 
 @app.route('/post/<alias>')
+@login_required
 def showPost(alias):
-    db = get_db()
-    dbase = FDataBase(db)
     title, post = dbase.getPost(alias)
     if not title:
         abort(404)
     
     return render_template('post.html', menu=dbase.getMenu(), title=title, post=post)
-
-
-@app.route('/contact', methods=['POST', 'GET'])
-def contact():
-    if request.method == 'POST':
-        if len(request.form['username']) > 2:
-            flash('Сообщение отправленно', category='success')
-        else:
-            flash('Ошибка отправки', category='error')
-    return render_template('contact.html', title='Обратная связь', menu=menu)
 
 
 @app.route('/profile/<username>')
@@ -101,23 +107,37 @@ def profile(username):
 
 @app.route('/login', methods=['POST', 'GET'])
 def login():
-    if 'userLogged' in session:
-        return redirect(url_for('profile', username=session['userLogged']))
-    elif request.method == 'POST' and request.form['username'] == 'Jasper' and request.form['psw'] == '123':
-        session['userLogged'] = request.form['username']
-        return redirect(url_for('profile', username=session['userLogged']))
-    
-    return render_template('login.html', title='Авторизация', menu=menu)
+    if request.method == 'POST':
+        user = dbase.getUserByEmail(request.form['email'])
+        if user and check_password_hash(user['psw'], request.form['psw']):
+            userlogin = UserLogin().create(user)
+            login_user(userlogin)
+            return redirect(url_for('index'))
+        flash('Неверный логин или пароль', 'error')
+    return render_template('login.html', menu=dbase.getMenu(), title='Авторизация')
 
+
+@app.route('/register', methods=['POST', 'GET'])
+def register():
+    if request.method == 'POST':
+        if len(request.form['name']) > 4 and len(request.form['email']) > 4 \
+            and len(request.form['psw']) > 4 and request.form['psw'] == request.form['psw2']:
+            hash = generate_password_hash(request.form['psw'])
+            res = dbase.addUser(request.form['name'], request.form['email'], hash)
+            if res:
+                flash('Вы успешно зарегистрировались', 'success')
+                return redirect(url_for('login'))
+            else:
+                flash('Ошибка при добавлении в БД', 'error')
+        else:
+            flash('Неверно заполнены поля', 'error')
+    return render_template('register.html', menu=dbase.getMenu(), title='Регистрация')
 
 
 @app.errorhandler(404)
 def pageNotFound(error):
     return render_template('page404.html', title='Страница не найдена', menu=menu), 404
 
-
-# with app.test_request_context():
-#     print(url_for("index"))
 
 if __name__ == "__main__":
     app.run()
