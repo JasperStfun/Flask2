@@ -2,7 +2,8 @@ import sqlite3
 import os
 
 from flask import Flask, abort, g, flash, render_template, redirect, request, session, url_for
-from flask_login import LoginManager, login_user, login_required
+from flask.helpers import make_response
+from flask_login import LoginManager, current_user, login_user, login_required, logout_user
 from werkzeug.security import generate_password_hash, check_password_hash
 
 from FDataBase import FDataBase
@@ -12,6 +13,7 @@ from UserLogin import UserLogin
 DATABASE = '/tmp/flsite.db'
 DEBUG = True
 SECRET_KEY = 'kakzhezaebalomenyavse'
+MAX_CONTENT_LENGTH = 1024 * 1024
 
 
 app = Flask(__name__)
@@ -20,6 +22,9 @@ app.config.from_object(__name__)
 app.config.update(dict(DATABASE=os.path.join(app.root_path, 'flsite.db')))
 
 login_manager = LoginManager(app)
+login_manager.login_view = 'login'
+login_manager.login_message = 'Сперва авторизируйтесь'
+login_manager.login_message_category = 'success'
 
 
 @login_manager.user_loader
@@ -73,6 +78,7 @@ def index():
 
 
 @app.route('/add_post', methods=['POST', 'GET'])
+@login_required
 def addPost():
 
     if request.method == 'POST':
@@ -98,23 +104,34 @@ def showPost(alias):
     return render_template('post.html', menu=dbase.getMenu(), title=title, post=post)
 
 
-@app.route('/profile/<username>')
-def profile(username):
-    if 'userLogged' not in session or session['userLogged'] != username:
-        abort(404)
-    return f'Пользователь: {username}'
+@app.route('/profile')
+@login_required
+def profile():
+    return render_template('profile.html', menu=dbase.getMenu(), title='Профиль')
 
 
 @app.route('/login', methods=['POST', 'GET'])
 def login():
+    if current_user.is_authenticated:
+        return redirect(url_for('profile'))
+
     if request.method == 'POST':
         user = dbase.getUserByEmail(request.form['email'])
         if user and check_password_hash(user['psw'], request.form['psw']):
             userlogin = UserLogin().create(user)
-            login_user(userlogin)
-            return redirect(url_for('index'))
+            rm = True if request.form.get('remainme') else False
+            login_user(userlogin, remember=rm)
+            return redirect(request.args.get('next') or url_for('profile'))
         flash('Неверный логин или пароль', 'error')
     return render_template('login.html', menu=dbase.getMenu(), title='Авторизация')
+
+
+@app.route('/logout')
+@login_required
+def logout():
+    logout_user()
+    flash('Вы вышли из аккаунта', 'success')
+    return redirect(url_for('login'))
 
 
 @app.route('/register', methods=['POST', 'GET'])
@@ -132,6 +149,37 @@ def register():
         else:
             flash('Неверно заполнены поля', 'error')
     return render_template('register.html', menu=dbase.getMenu(), title='Регистрация')
+
+
+@app.route('/userava')
+@login_required
+def userava():
+    img = current_user.getAvatar(app)
+    if not img:
+        return ""
+
+    h = make_response(img)
+    h.headers['Content-Type'] = 'image/png'
+    return h
+
+
+@app.route('/upload', methods=['POST', 'GET'])
+@login_required
+def upload():
+    if request.method == 'POST':
+        file = request.files['file']
+        if file and current_user.verifyExt(file.filename):
+            try:
+                img = file.read()
+                res = dbase.updateUserAvatar(img, current_user.get_id())
+                if not res:
+                    flash('Ошибка обновления аватара', 'error')
+                flash('Аватар обновлен', 'success')
+            except FileNotFoundError as e:
+                flash('Ошибка чтения файла'+str(e))
+        else:
+            flash('Ошибка обновления аватара', 'error')
+    return redirect(url_for('profile'))
 
 
 @app.errorhandler(404)
